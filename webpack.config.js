@@ -11,6 +11,7 @@ const SRC_DIR = './src';
 let config = {
   // unless we are in production, use inline-source-map development tool
   // which helps track down bugs
+  watch:true,
   devtool: PROD ? false : 'inline-source-map',
 
   // entry point - src/index.js
