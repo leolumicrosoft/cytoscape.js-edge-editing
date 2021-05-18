@@ -28,6 +28,8 @@
       undoable: false,
       // the size of bend and control point shape is obtained by multipling width of edge with this parameter
       anchorShapeSizeFactor: 3,
+      //size of anchorpoint can be auto changed to compensate the impact of cy zooming level
+      enableAnchorSizeNotImpactByZoom: false,
       // z-index value of the canvas in which bend and control points are drawn
       zIndex: 999,      
       // whether to start the plugin in the enabled state
@@ -51,7 +53,13 @@
           return true;
       },
       // whether 'Remove all bend points' and 'Remove all control points' options should be presented
-      enableMultipleAnchorRemovalOption: false
+      enableMultipleAnchorRemovalOption: false,
+      // whether allows adding bending point by draging edge without useing ctxmenu, default is true
+      enableCreateAnchorOnDrag:true,
+      // how to smartly move the anchor point to perfect 0 45 or 90 degree position, unit is px
+      stickyAnchorTolerence: -1,  //-1 actually disable this feature, change it to 20 to test the feature
+      //automatically remove anchor if its prev segement and next segment is almost in a same line
+      enableRemoveAnchorMidOfNearLine:true
     };
     
     var options;
@@ -132,12 +140,12 @@
           anchorPointUtilities.initAnchorPoints(options.bendPositionsFunction, options.controlPositionsFunction, cy.edges(), options.ignoredClasses);
         }
 
-        if(options.enabled)
+        if(options.enabled) 
           uiUtilities(options, cy);
         else
           uiUtilities("unbind", cy);
       }
-      
+    
       var instance = initialized ? {
         /*
         * get bend or control points of the given edge in an array A,

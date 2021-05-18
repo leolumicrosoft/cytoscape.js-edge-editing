@@ -114,9 +114,14 @@
 				
 				// demo your ext
 				cy.edgeEditing({
-									undoable: true,
-                  bendRemovalSensitivity: 16,
-                  enableMultipleAnchorRemovalOption: true
+					undoable: true,
+					bendRemovalSensitivity: 16,
+					enableMultipleAnchorRemovalOption: true,
+					stickyAnchorTolerence: 20,
+					anchorShapeSizeFactor: 5,
+					enableAnchorSizeNotImpactByZoom:true,
+					enableRemoveAnchorMidOfNearLine:false,
+					enableCreateAnchorOnDrag:false
 				});
 				
 				cy.style().update();
