@@ -24,6 +24,7 @@
 			body {
 				font-family: helvetica neue, helvetica, liberation sans, arial, sans-serif;
 				font-size: 14px;
+				overflow: hidden;
 			}
 
 			#cy {
@@ -121,7 +122,9 @@
 					anchorShapeSizeFactor: 5,
 					enableAnchorSizeNotImpactByZoom:true,
 					enableRemoveAnchorMidOfNearLine:false,
-					enableCreateAnchorOnDrag:false
+					enableCreateAnchorOnDrag:false,
+					enableAnchorsAbsolutePosition:true,
+					disableReconnect:true
 				});
 				
 				cy.style().update();

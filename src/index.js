@@ -28,8 +28,6 @@
       undoable: false,
       // the size of bend and control point shape is obtained by multipling width of edge with this parameter
       anchorShapeSizeFactor: 3,
-      //size of anchorpoint can be auto changed to compensate the impact of cy zooming level
-      enableAnchorSizeNotImpactByZoom: false,
       // z-index value of the canvas in which bend and control points are drawn
       zIndex: 999,      
       // whether to start the plugin in the enabled state
@@ -54,12 +52,19 @@
       },
       // whether 'Remove all bend points' and 'Remove all control points' options should be presented
       enableMultipleAnchorRemovalOption: false,
+      
+      //size of anchorpoint can be auto changed to compensate the impact of cy zooming level
+      enableAnchorSizeNotImpactByZoom: false,
       // whether allows adding bending point by draging edge without useing ctxmenu, default is true
       enableCreateAnchorOnDrag:true,
       // how to smartly move the anchor point to perfect 0 45 or 90 degree position, unit is px
-      stickyAnchorTolerence: -1,  //-1 actually disable this feature, change it to 20 to test the feature
+      stickyAnchorTolerence: -1,  //-1 actually disable this feature, change it to 20(the pixel distance to "freeze") to test the feature
       //automatically remove anchor if its prev segement and next segment is almost in a same line
-      enableRemoveAnchorMidOfNearLine:true
+      enableRemoveAnchorMidOfNearLine:true,
+      //bending points are kept at absolute position when moving source or destination node
+      enableAnchorsAbsolutePosition:false,
+      //donot allow reconnect by tap and drag edge endpoints
+      disableReconnect:false
     };
     
     var options;
@@ -94,7 +99,7 @@
       }
 
       return obj;
-    };
+    }
     
     cytoscape( 'core', 'edgeEditing', function(opts){
       var cy = this;
@@ -140,6 +145,36 @@
           anchorPointUtilities.initAnchorPoints(options.bendPositionsFunction, options.controlPositionsFunction, cy.edges(), options.ignoredClasses);
         }
 
+        if (options.enableAnchorsAbsolutePosition) {
+          var instance = cy.edgeEditing('get');
+          var tapdragHandler = (e) => {
+            instance.keepAnchorsAbsolutePositionDuringMoving()
+          }
+          var setOneTimeGrab = () => {
+            cy.once("grab", (e) => {
+              var draggingNodes = cy.collection()
+              if (e.target.isNode()) draggingNodes.merge(e.target)
+              var arr = cy.$(":selected")
+              arr.forEach((ele) => {
+                if (ele.isNode()) draggingNodes.merge(ele)
+              })
+              var instance = cy.edgeEditing('get');
+              instance.storeAnchorsAbsolutePosition(draggingNodes)
+              cy.on("tapdrag", tapdragHandler)
+              setOneTimeFree()
+            })
+          }
+          var setOneTimeFree = () => {
+            cy.once("free", (e) => {
+              var instance = cy.edgeEditing('get');
+              instance.resetAnchorsAbsolutePosition()
+              setOneTimeGrab()
+              cy.removeListener("tapdrag", tapdragHandler)
+            })
+          }
+          setOneTimeGrab()
+        }
+
         if(options.enabled) 
           uiUtilities(options, cy);
         else
@@ -155,6 +190,16 @@
         getAnchorsAsArray: function(ele) {
           return anchorPointUtilities.getAnchorsAsArray(ele);
         },
+        storeAnchorsAbsolutePosition: function(draggingNodes){
+          anchorPointUtilities.storeAnchorsAbsolutePosition(draggingNodes);
+        },
+        resetAnchorsAbsolutePosition:function(){
+          anchorPointUtilities.resetAnchorsAbsolutePosition();
+        },
+        keepAnchorsAbsolutePositionDuringMoving: function(){
+          anchorPointUtilities.keepAnchorsAbsolutePositionDuringMoving();
+        },
+
         // Initilize points for the given edges using 'options.bendPositionsFunction'
         initAnchorPoints: function(eles) {
           anchorPointUtilities.initAnchorPoints(options.bendPositionsFunction, options.controlPositionsFunction, eles);

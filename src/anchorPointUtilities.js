@@ -2,6 +2,7 @@ var anchorPointUtilities = {
   currentCtxEdge: undefined,
   currentCtxPos: undefined,
   currentAnchorIndex: undefined,
+  currentEdgesForFixAnchorPositions:undefined,
   ignoredClasses: undefined,
   setIgnoredClasses: function(_ignoredClasses) {
     this.ignoredClasses = _ignoredClasses;
@@ -16,6 +17,7 @@ var anchorPointUtilities = {
       weightCss: "segment-weights",
       distanceCss: "segment-distances",
       pointPos: "bendPointPositions",
+      bendAnchorsAbsolutePosition:"bendAnchorsAbsolutePosition"
     },
     control: {
       edge: "unbundled-bezier",
@@ -104,25 +106,35 @@ var anchorPointUtilities = {
   },
   //Get the direction of the line from source point to the target point
   getLineDirection: function(srcPoint, tgtPoint){
-    if(srcPoint.y == tgtPoint.y && srcPoint.x < tgtPoint.x){
+    var srcY=srcPoint.y
+    var srcX=srcPoint.x
+    var tgtY=tgtPoint.y
+    var tgtX=tgtPoint.x
+
+    var compareEqual=(v1,v2)=>{
+      if(Math.abs(v1-v2)<0.0001) return true
+      else return false
+    }
+
+    if( compareEqual(srcPoint.y,tgtPoint.y) && srcPoint.x < tgtPoint.x){
       return 1;
     }
     if(srcPoint.y < tgtPoint.y && srcPoint.x < tgtPoint.x){
       return 2;
     }
-    if(srcPoint.y < tgtPoint.y && srcPoint.x == tgtPoint.x){
+    if(srcPoint.y < tgtPoint.y && compareEqual(srcPoint.x,tgtPoint.x)){
       return 3;
     }
     if(srcPoint.y < tgtPoint.y && srcPoint.x > tgtPoint.x){
       return 4;
     }
-    if(srcPoint.y == tgtPoint.y && srcPoint.x > tgtPoint.x){
+    if(compareEqual(srcPoint.y,tgtPoint.y) && srcPoint.x > tgtPoint.x){
       return 5;
     }
     if(srcPoint.y > tgtPoint.y && srcPoint.x > tgtPoint.x){
       return 6;
     }
-    if(srcPoint.y > tgtPoint.y && srcPoint.x == tgtPoint.x){
+    if(srcPoint.y > tgtPoint.y && compareEqual(srcPoint.x ,tgtPoint.x)){
       return 7;
     }
     return 8;//if srcPoint.y > tgtPoint.y and srcPoint.x < tgtPoint.x
@@ -165,7 +177,7 @@ var anchorPointUtilities = {
       intersectX = srcPoint.x;
       intersectY = point.y;
     }
-    else if(m1 == 0){
+    else if(Math.abs(m1) < 0.0000001){
       intersectX = point.x;
       intersectY = srcPoint.y;
     }
@@ -205,57 +217,47 @@ var anchorPointUtilities = {
                   edge.pstyle( this.syntax[type]['distanceCss'] ).pfValue : [];
     var minLengths = Math.min( weights.length, distances.length );
     
-    var srcPos = edge.source().position();
-    var tgtPos = edge.target().position();
-
-    var dy = ( tgtPos.y - srcPos.y );
-    var dx = ( tgtPos.x - srcPos.x );
-    
-    var l = Math.sqrt( dx * dx + dy * dy );
-
-    var vector = {
-      x: dx,
-      y: dy
-    };
-
-    var vectorNorm = {
-      x: vector.x / l,
-      y: vector.y / l
-    };
-    
-    var vectorNormInverse = {
-      x: -vectorNorm.y,
-      y: vectorNorm.x
-    };
-
     for( var s = 0; s < minLengths; s++ ){
-      var w = weights[ s ];
-      var d = distances[ s ];
-
-      var w1 = (1 - w);
-      var w2 = w;
-
-      var posPts = {
-        x1: srcPos.x,
-        x2: tgtPos.x,
-        y1: srcPos.y,
-        y2: tgtPos.y
-      };
-
-      var midptPts = posPts;
-      
-      var adjustedMidpt = {
-        x: midptPts.x1 * w1 + midptPts.x2 * w2,
-        y: midptPts.y1 * w1 + midptPts.y2 * w2
-      };
-
-      anchorList.push(
-        adjustedMidpt.x + vectorNormInverse.x * d,
-        adjustedMidpt.y + vectorNormInverse.y * d
-      );
+      var anAnchorPosition= this.convertToAnchorAbsolutePositions(edge, type, s)
+      anchorList.push(anAnchorPosition.x,anAnchorPosition.y);
     }
     
     return anchorList;
+  },
+  resetAnchorsAbsolutePosition: function () {
+    this.currentEdgesForFixAnchorPositions=undefined
+  },
+  storeAnchorsAbsolutePosition: function (draggingNodes) {
+    //find all edge to those dragging nodes
+    var impactEdges = draggingNodes.connectedEdges()
+    var excludeEdges = draggingNodes.edgesWith(draggingNodes)
+    //exclude those edges whose source and target was in draggingnodes
+    impactEdges=impactEdges.unmerge(excludeEdges)
+
+    impactEdges.forEach(oneEdge => {
+      var arr=this.getAnchorsAsArray(oneEdge)
+      if(arr=== undefined) return;
+      var positionsArr=[]
+      for(var i=0;i<arr.length;i+=2){
+        positionsArr.push({x:arr[i],y:arr[i+1]})
+      }
+      oneEdge.data(this.syntax['bend']['bendAnchorsAbsolutePosition'],positionsArr )
+    });
+    this.currentEdgesForFixAnchorPositions=impactEdges
+  },
+  keepAnchorsAbsolutePositionDuringMoving:function(){
+    if(this.currentEdgesForFixAnchorPositions===undefined) return;
+    this.currentEdgesForFixAnchorPositions.forEach(oneEdge=>{
+      var storedPosition=oneEdge.data(this.syntax['bend']['bendAnchorsAbsolutePosition'])
+      var result = this.convertToRelativePositions(oneEdge, storedPosition);
+      if(result.distances<0){
+        var result = this.convertToRelativePositions(oneEdge, storedPosition);
+      }
+      if (result.distances.length > 0) {
+        oneEdge.data(this.syntax['bend']['weight'], result.weights);
+        oneEdge.data(this.syntax['bend']['distance'], result.distances);
+      }
+    })
   },
   convertToAnchorAbsolutePositions: function (edge, type, anchorIndex) {
     var srcPos = edge.source().position();

@@ -1008,8 +1008,8 @@ module.exports = function (params, cy) {
           var cyPosY = tapStartPos.y;
           
           // Get which end point has been clicked (Source:0, Target:1, None:-1)
-          var endPoint = getContainingEndPoint(cyPosX, cyPosY, edge);
-
+          if(opts.disableReconnect) var endPoint=-1
+          else endPoint = getContainingEndPoint(cyPosX, cyPosY, edge);
           if(endPoint == 0 || endPoint == 1){
             edge.unselect();
             movedEndPoint = endPoint;
