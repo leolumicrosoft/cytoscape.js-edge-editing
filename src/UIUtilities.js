@@ -13,12 +13,13 @@ module.exports = function (params, cy) {
   var addControlPointCxtMenuId = 'cy-edge-control-editing-cxt-add-control-point' + stageId;
   var removeControlPointCxtMenuId = 'cy-edge-control-editing-cxt-remove-control-point' + stageId;
   var removeAllControlPointCtxMenuId = 'cy-edge-bend-editing-cxt-remove-multiple-control-point' + stageId;
-  var eStyle, eRemove, eAdd, eZoom, eSelect, eUnselect, eTapStart, eTapStartOnEdge, eTapDrag, eTapEnd, eCxtTap, eDrag;
+  var eStyle, eRemove, eAdd, eZoom, eSelect, eUnselect, eTapStart, eTapStartOnEdge, eTapDrag, eTapEnd, eCxtTap;
+  var nSelect,nUnselect,nDrag
   // last status of gestures
   var lastPanningEnabled, lastZoomingEnabled, lastBoxSelectionEnabled;
   var lastActiveBgOpacity;
   // status of edge to highlight bends and selected edges
-  var edgeToHighlight, numberOfSelectedEdges;
+  var edgeToHighlight,nodeToHighlight;
 
   // the Kanva.shape() for the endpoints
   var endpointShape1 = null, endpointShape2 = null;
@@ -98,27 +99,43 @@ module.exports = function (params, cy) {
         // gets trigger on clicking on context menus, while cy listeners don't get triggered
         // it can cause weird behaviour if not aware of this
         eMouseDown: function(event){
-          // anchorManager.edge.unselect() won't work sometimes if this wasn't here
-          cy.autounselectify(false);
-
           // eMouseDown(set) -> tapdrag(used) -> eMouseUp(reset)
           anchorTouched = true;
           anchorManager.touchedAnchor = event.target;
+          
           mouseOut = false;
-          anchorManager.edge.unselect();
 
-          // remember state before changing
-          var weightStr = anchorPointUtilities.syntax[anchorManager.edgeType]['weight'];
-          var distanceStr = anchorPointUtilities.syntax[anchorManager.edgeType]['distance'];
-
-          var edge = anchorManager.edge;
-          moveAnchorParam = {
-            edge: edge,
-            type: anchorManager.edgeType,
-            weights: edge.data(weightStr) ? [].concat(edge.data(weightStr)) : [],
-            distances: edge.data(distanceStr) ? [].concat(edge.data(distanceStr)) : []
-          };
-
+          if(anchorManager.edge){
+            // anchorManager.edge.unselect() won't work sometimes if this wasn't here
+            cy.autounselectify(false);
+            anchorManager.edge.unselect();
+            // remember state before changing
+            var weightStr = anchorPointUtilities.syntax[anchorManager.edgeType]['weight'];
+            var distanceStr = anchorPointUtilities.syntax[anchorManager.edgeType]['distance'];
+  
+            var edge = anchorManager.edge;
+            moveAnchorParam = {
+              edge: edge,
+              type: anchorManager.edgeType,
+              weights: edge.data(weightStr) ? [].concat(edge.data(weightStr)) : [],
+              distances: edge.data(distanceStr) ? [].concat(edge.data(distanceStr)) : []
+            };
+          }else if(anchorManager.node){
+            anchorManager.node.unselect();
+            var eventPos = event.position || event.cyPosition;
+            anchorManager.node.addClass("edgebendediting_scaleRotate")
+            moveAnchorParam = {
+              node: anchorManager.node,
+              originalWidth:  anchorManager.node.width(),
+              originalHeight: anchorManager.node.height(),
+              dragStartX:event.evt.x,
+              dragStartY:event.evt.y,
+              originalScaleFactor: anchorManager.node.data("scaleFactor")||1,
+              originalRotateAngle: anchorManager.node.data("rotateAngle")||0,
+              isScaleHandle:event.target.attrs.scaleHandle
+            };
+          }
+          
           turnOffActiveBgColor();
           disableGestures();
           
@@ -133,7 +150,8 @@ module.exports = function (params, cy) {
           anchorTouched = false;
           anchorManager.touchedAnchor = undefined;
           mouseOut = false;
-          anchorManager.edge.select();
+          if(anchorManager.edge) anchorManager.edge.select();
+          if(anchorManager.node) anchorManager.node.select();
           
           resetActiveBgColor();
           resetGestures();
@@ -157,7 +175,7 @@ module.exports = function (params, cy) {
            * These is anther cy.autoselectify(true) in cy.on('tapend') 
            * 
           */ 
-          cy.autounselectify(true);
+          if(anchorManager.edge) cy.autounselectify(true);
           cy.autoungrabify(false);
 
           canvas.getStage().off("contentTouchend contentMouseup", anchorManager.eMouseUp);
@@ -189,9 +207,43 @@ module.exports = function (params, cy) {
             this.edgeType = 'inconclusive';
           }
         },
+
+        renderAnchorShapesForNode:function(node){
+          this.node = node
+          this.edge = undefined
+          var pos = node.position()
+          var nodeWidth = node.width()
+          var nodeHeight = node.height()
+
+
+          var ang=node.data("rotateAngle")||0
+          var x= - nodeWidth / 2, y=- nodeHeight / 2
+          var _x=x*Math.cos(ang)-y*Math.sin(ang)
+          var _y=x*Math.sin(ang)+y*Math.cos(ang)
+          var leftTop = {x: pos.x +_x,y: pos.y +_y}
+
+          var rightBottom = {x: pos.x + nodeWidth / 3, y: pos.y + nodeHeight / 3}
+          var length = getAnchorShapesLengthForNode() * 0.65* cy.zoom() / 2;
+
+          var renderedSourcePos = convertToRenderedPosition({ x: leftTop.x, y: leftTop.y });
+          var renderedTargetPos = convertToRenderedPosition({ x: rightBottom.x, y: rightBottom.y });
+
+          endpointShape1 = new Konva.Arc({ x: renderedSourcePos.x, y: renderedSourcePos.y, innerRadius: length*2 / 3, outerRadius: length*4/3, angle: 120, rotation: 165+ang/Math.PI*180, fill: 'orange' });
+          endpointShape2 = new Konva.Arrow({
+            x: renderedTargetPos.x, y: renderedTargetPos.y, points: [0, 0, length*0.5, length*0.5,length*0.7,length*0.7],
+            fill: 'orange',stroke: 'orange',strokeWidth: 12,scaleHandle:1        })
+          this.anchors.push(endpointShape1, endpointShape2);
+          this.bindListeners(endpointShape1);
+          this.bindListeners(endpointShape2);
+          canvas.add(endpointShape1);
+          canvas.add(endpointShape2);
+          canvas.draw();
+        },
+
         // render the bend and control shapes of the given edge
         renderAnchorShapes: function(edge) {
           this.edge = edge;
+          this.node = undefined
           this.edgeType = anchorPointUtilities.getEdgeType(edge);
 
           if(!edge.hasClass('edgebendediting-hasbendpoints') &&
@@ -463,7 +515,6 @@ module.exports = function (params, cy) {
       }
       
       function refreshDraws() {
-
         // don't clear anchor which is being moved
         anchorManager.clearAnchorsExcept(anchorManager.touchedAnchor);
         
@@ -476,13 +527,15 @@ module.exports = function (params, cy) {
           endpointShape2 = null;
         }
         canvas.draw();
-
         if( edgeToHighlight ) {
           anchorManager.renderAnchorShapes(edgeToHighlight);
           renderEndPointShapes(edgeToHighlight);
         }
+        if(nodeToHighlight){
+          anchorManager.renderAnchorShapesForNode(nodeToHighlight);
+        }
       }
-      
+
       // render the end points shapes of the given edge
       function renderEndPointShapes(edge) {
         if(!edge){
@@ -524,8 +577,7 @@ module.exports = function (params, cy) {
         }
         var length = getAnchorShapesLength(edge) * 0.65;
         
-        renderEachEndPointShape(src, target, length,nextToSource,nextToTarget);
-        
+        renderEachEndPointShape(src, target, length,nextToSource,nextToTarget); 
       }
 
       function renderEachEndPointShape(source, target, length,nextToSource,nextToTarget) {
@@ -536,32 +588,28 @@ module.exports = function (params, cy) {
         var tTopLeftX = target.x - length / 2;
         var tTopLeftY = target.y - length / 2;
 
-        var nextToSourceX = nextToSource.x - length /2;
-        var nextToSourceY = nextToSource.y - length / 2;
-
-        var nextToTargetX = nextToTarget.x - length /2;
-        var nextToTargetY = nextToTarget.y - length /2;
-
-
         // convert to rendered parameters
         var renderedSourcePos = convertToRenderedPosition({x: sTopLeftX, y: sTopLeftY});
         var renderedTargetPos = convertToRenderedPosition({x: tTopLeftX, y: tTopLeftY});
         length = length * cy.zoom() / 2;
 
-        var renderedNextToSource = convertToRenderedPosition({x: nextToSourceX, y: nextToSourceY});
-        var renderedNextToTarget = convertToRenderedPosition({x: nextToTargetX, y: nextToTargetY});
-        
-        //how far to go from the node along the edge
-        var distanceFromNode = length;
+        var nextToSourceX = nextToSource.x - length /2;
+          var nextToSourceY = nextToSource.y - length / 2;
+          var nextToTargetX = nextToTarget.x - length /2;
+          var nextToTargetY = nextToTarget.y - length /2;
+          var renderedNextToSource = convertToRenderedPosition({ x: nextToSourceX, y: nextToSourceY });
+          var renderedNextToTarget = convertToRenderedPosition({ x: nextToTargetX, y: nextToTargetY });
+          //how far to go from the node along the edge
+          var distanceFromNode = length;
 
-        var distanceSource = Math.sqrt(Math.pow(renderedNextToSource.x - renderedSourcePos.x,2) + Math.pow(renderedNextToSource.y - renderedSourcePos.y,2));        
-        var sourceEndPointX = renderedSourcePos.x + ((distanceFromNode/ distanceSource)* (renderedNextToSource.x - renderedSourcePos.x));
-        var sourceEndPointY = renderedSourcePos.y + ((distanceFromNode/ distanceSource)* (renderedNextToSource.y - renderedSourcePos.y));
+          var distanceSource = Math.sqrt(Math.pow(renderedNextToSource.x - renderedSourcePos.x, 2) + Math.pow(renderedNextToSource.y - renderedSourcePos.y, 2));
+          var sourceEndPointX = renderedSourcePos.x + ((distanceFromNode / distanceSource) * (renderedNextToSource.x - renderedSourcePos.x));
+          var sourceEndPointY = renderedSourcePos.y + ((distanceFromNode / distanceSource) * (renderedNextToSource.y - renderedSourcePos.y));
 
 
-        var distanceTarget = Math.sqrt(Math.pow(renderedNextToTarget.x - renderedTargetPos.x,2) + Math.pow(renderedNextToTarget.y - renderedTargetPos.y,2));        
-        var targetEndPointX = renderedTargetPos.x + ((distanceFromNode/ distanceTarget)* (renderedNextToTarget.x - renderedTargetPos.x));
-        var targetEndPointY = renderedTargetPos.y + ((distanceFromNode/ distanceTarget)* (renderedNextToTarget.y - renderedTargetPos.y)); 
+          var distanceTarget = Math.sqrt(Math.pow(renderedNextToTarget.x - renderedTargetPos.x, 2) + Math.pow(renderedNextToTarget.y - renderedTargetPos.y, 2));
+          var targetEndPointX = renderedTargetPos.x + ((distanceFromNode / distanceTarget) * (renderedNextToTarget.x - renderedTargetPos.x));
+          var targetEndPointY = renderedTargetPos.y + ((distanceFromNode / distanceTarget) * (renderedNextToTarget.y - renderedTargetPos.y));
 
         // render end point shape for source and target
         // the null checks are not theoretically required
@@ -571,7 +619,7 @@ module.exports = function (params, cy) {
             x: sourceEndPointX + length,
             y: sourceEndPointY + length,
             radius: length,
-            fill: 'black',
+            fill: 'gray',
           });
         }
 
@@ -580,14 +628,13 @@ module.exports = function (params, cy) {
             x: targetEndPointX + length,
             y: targetEndPointY + length,
             radius: length,
-            fill: 'black',
+            fill: 'gray',
           });
         }
 
         canvas.add(endpointShape1);
         canvas.add(endpointShape2);
         canvas.draw();
-        
       }
 
       // get the length of anchor points to be rendered
@@ -598,6 +645,12 @@ module.exports = function (params, cy) {
         if (parseFloat(edge.css('width')) <= 2.5)
           return 2.5 * actualFactor;
         else return parseFloat(edge.css('width'))*actualFactor;
+      }
+      function getAnchorShapesLengthForNode() {
+        var factor = options().anchorShapeSizeFactor;
+        if(options().enableAnchorSizeNotImpactByZoom) var actualFactor= factor/cy.zoom()
+        else var actualFactor= factor
+        return 15 * actualFactor;
       }
       
       // check if the anchor represented by {x, y} is inside the point shape
@@ -751,6 +804,34 @@ module.exports = function (params, cy) {
         return {"costDistance":cost,"x":targetPointX,"y":targetPointY,"angle":chosenAngle}
       }
 
+      function moveNodeAnchorOnDrag(node,position,renderPos){
+        if(!moveAnchorParam) return;
+        var pos=node.position()
+        var rpos=node.renderedPosition()
+
+        if(moveAnchorParam.isScaleHandle){
+          var w=moveAnchorParam.originalWidth||30
+          var h=moveAnchorParam.originalHeight||30
+          var originalF=moveAnchorParam.originalScaleFactor
+          var f1=Math.abs(position.x-pos.x)/w*2
+          var f2=Math.abs(position.y-pos.y)/h*2
+          var f=Math.min(f1,f2) * originalF
+          var intF=f.toFixed(0)
+          if(Math.abs(f-intF)<0.3) f=intF
+          if(f<0.2) f=0.2
+          node.data('scaleFactor',f)
+        }else{
+          var x1=moveAnchorParam.dragStartX-rpos.x, y1=moveAnchorParam.dragStartY-rpos.y,x2=renderPos.x-rpos.x,y2=renderPos.y-rpos.y
+          var dot=x1*x2+y1*y2
+          var det=x1*y2-x2*y1
+          var angle=Math.atan2(det,dot)+moveAnchorParam.originalRotateAngle
+          var degreeAng=angle/Math.PI*180
+          var fixedDegree= (degreeAng/90).toFixed(0)*90
+          if(Math.abs(fixedDegree-degreeAng)<15) angle=fixedDegree*Math.PI/180
+          node.data('rotateAngle',angle)
+        }
+      }
+
       function moveAnchorOnDrag(edge, type, index, position){
         var prevPointPosition=anchorPointUtilities.obtainPrevAnchorAbsolutePositions(edge,type,index)
         var nextPointPosition=anchorPointUtilities.obtainNextAnchorAbsolutePositions(edge,type,index)
@@ -819,8 +900,8 @@ module.exports = function (params, cy) {
         edge.data(anchorPointUtilities.syntax[type]['distance'], distances);
       }
 
-      // debounced due to large amout of calls to tapdrag
-      var _moveAnchorOnDrag = debounce( moveAnchorOnDrag, 5);
+      
+      var _moveAnchorOnDrag = moveAnchorOnDrag //debounce( moveAnchorOnDrag, 5);
 
       {  
         lastPanningEnabled = cy.panningEnabled();
@@ -831,27 +912,32 @@ module.exports = function (params, cy) {
         {
           var selectedEdges = cy.edges(':selected');
           var numberOfSelectedEdges = selectedEdges.length;
-          
-          if ( numberOfSelectedEdges === 1 ) {
+          var selectedNodes= cy.nodes(':selected');
+          var numberOfSelectedNodes=selectedNodes.length;
+
+          if ( numberOfSelectedEdges === 1 && numberOfSelectedNodes===0 ) {
             edgeToHighlight = selectedEdges[0];
+          }
+          if ( numberOfSelectedEdges === 0 && numberOfSelectedNodes===1 ) {
+            nodeToHighlight = selectedNodes[0];
           }
         }
         
         cy.bind('zoom pan', eZoom = function () {
-          if ( !edgeToHighlight ) {
+          if ( !edgeToHighlight && !nodeToHighlight ) {
             return;
           }
           
           refreshDraws();
         });
+        cy.bind('drag','node', nDrag = function () {
+          if(nodeToHighlight==this) refreshDraws();
+          if(edgeToHighlight!=null && (edgeToHighlight.source()==this || edgeToHighlight.target()==this) ) refreshDraws();
+        });
 
         // cy.off is never called on this listener
         cy.on('data', 'edge',  function () {
-          if ( !edgeToHighlight ) {
-            return;
-          }
-          
-          refreshDraws();
+          if (edgeToHighlight==this ) refreshDraws();
         });
 
         cy.on('style', 'edge.edgebendediting-hasbendpoints:selected, edge.edgecontrolediting-hascontrolpoints:selected', eStyle = function () {
@@ -915,6 +1001,32 @@ module.exports = function (params, cy) {
           refreshDraws();
         });
         
+        cy.on('select', 'node', nSelect = function () {
+          var numberOfSelectedNodes=cy.nodes(':selected').length;
+          if (nodeToHighlight) {
+            nodeToHighlight.removeClass('cy-node-editing-highlight');
+            nodeToHighlight=undefined;
+          }
+          if(numberOfSelectedNodes==1 && numberOfSelectedEdges==0) {
+            nodeToHighlight=this
+            nodeToHighlight.addClass('cy-node-editing-highlight');            
+          }
+          refreshDraws();
+        });
+        cy.on('unselect', 'node', nUnselect = function () {
+          var numberOfSelectedNodes=cy.nodes(':selected').length;
+          if (nodeToHighlight) {
+            nodeToHighlight.removeClass('cy-node-editing-highlight');
+            nodeToHighlight=undefined;
+          }
+          if(numberOfSelectedNodes==1 && numberOfSelectedEdges==0) {
+            nodeToHighlight=cy.nodes(':selected')[0]
+            nodeToHighlight.addClass('cy-node-editing-highlight');            
+          }
+          refreshDraws();
+        });
+
+
         cy.on('select', 'edge', eSelect = function () {
           var edge = this;
 
@@ -976,6 +1088,7 @@ module.exports = function (params, cy) {
         var movedAnchorIndex;
         var tapStartPos;
         var movedEdge;
+        var movedNode;
         var moveAnchorParam;
         var createAnchorOnDrag;
         var movedEndPoint;
@@ -1028,99 +1141,87 @@ module.exports = function (params, cy) {
             createAnchorOnDrag = true;
           }
         });
-        
-        cy.on('drag', 'node', eDrag = function (event) {
-          var node = this;
-          cy.edges().unselect();
-          if(!node.selected()){
-            cy.nodes().unselect();
-          }         
-        });
+
         cy.on('tapdrag', eTapDrag = function (event) {
           /** 
            * if there is a selected edge set autounselectify false
            * fixes the node-editing problem where nodes would get
            * unselected after resize drag
           */
-          if (cy.edges(':selected').length > 0) {
-            cy.autounselectify(false);
-          }
-          var edge = movedEdge;
-
-          if(movedEdge !== undefined && anchorPointUtilities.isIgnoredEdge(edge) ) {
-            return;
-          }
-
-          var type = anchorPointUtilities.getEdgeType(edge);
-
-          if(createAnchorOnDrag && opts.enableCreateAnchorOnDrag && !anchorTouched && type !== 'inconclusive') {
-            // remember state before creating anchor
-            var weightStr = anchorPointUtilities.syntax[type]['weight'];
-            var distanceStr = anchorPointUtilities.syntax[type]['distance'];
-
-            moveAnchorParam = {
-              edge: edge,
-              type: type,
-              weights: edge.data(weightStr) ? [].concat(edge.data(weightStr)) : [],
-              distances: edge.data(distanceStr) ? [].concat(edge.data(distanceStr)) : []
-            };
-
-            edge.unselect();
-
-            // using tapstart position fixes bug on quick drags
-            // --- 
-            // also modified addAnchorPoint to return the index because
-            // getContainingShapeIndex failed to find the created anchor on quick drags
-            movedAnchorIndex = anchorPointUtilities.addAnchorPoint(edge, tapStartPos);
-            movedEdge = edge;
-            createAnchorOnDrag = undefined;
-            anchorCreatedByDrag = true;
-            disableGestures();
-          }
-
-          // if the tapstart did not hit an edge and it did not hit an anchor
-          if (!anchorTouched && (movedEdge === undefined || 
-            (movedAnchorIndex === undefined && movedEndPoint === undefined))) {
-            return;
-          }
-
+          if (!anchorManager.node && !anchorManager.edge) return;
           var eventPos = event.position || event.cyPosition;
+          var eventRenderPos=event.renderedPosition
+          if (anchorManager.edge) {//dragging edge anchor or edge itself to create anchor
+            if (cy.edges(':selected').length > 0) cy.autounselectify(false);
+            var edge = movedEdge;
+            if (movedEdge !== undefined && anchorPointUtilities.isIgnoredEdge(edge)) return;
+            var type = anchorPointUtilities.getEdgeType(edge);
+            if (createAnchorOnDrag && opts.enableCreateAnchorOnDrag && !anchorTouched && type !== 'inconclusive') {
+              // remember state before creating anchor
+              var weightStr = anchorPointUtilities.syntax[type]['weight'];
+              var distanceStr = anchorPointUtilities.syntax[type]['distance'];
 
-          // Update end point location (Source:0, Target:1)
-          if(movedEndPoint != -1 && dummyNode){
-            dummyNode.position(eventPos);
-          }
-          // change location of anchor created by drag
-          else if(movedAnchorIndex != undefined){
-            _moveAnchorOnDrag(edge, type, movedAnchorIndex, eventPos);
-          }
-          // change location of drag and dropped anchor
-          else if(anchorTouched){
+              moveAnchorParam = {
+                edge: edge,
+                type: type,
+                weights: edge.data(weightStr) ? [].concat(edge.data(weightStr)) : [],
+                distances: edge.data(distanceStr) ? [].concat(edge.data(distanceStr)) : []
+              };
 
-            // the tapStartPos check is necessary when righ clicking anchor points
-            // right clicking anchor points triggers MouseDown for Konva, but not tapstart for cy
-            // when that happens tapStartPos is undefined
-            if(anchorManager.touchedAnchorIndex === undefined && tapStartPos){
-              anchorManager.touchedAnchorIndex = getContainingShapeIndex(
-                tapStartPos.x, 
-                tapStartPos.y,
-                anchorManager.edge);
+              edge.unselect();
+
+              // using tapstart position fixes bug on quick drags
+              // --- 
+              // also modified addAnchorPoint to return the index because
+              // getContainingShapeIndex failed to find the created anchor on quick drags
+              movedAnchorIndex = anchorPointUtilities.addAnchorPoint(edge, tapStartPos);
+              movedEdge = edge;
+              createAnchorOnDrag = undefined;
+              anchorCreatedByDrag = true;
+              disableGestures();
+            }
+            // if the tapstart did not hit an edge and it did not hit an anchor
+            if (!anchorTouched && (movedEdge === undefined || (movedAnchorIndex === undefined && movedEndPoint === undefined))) {
+              return;
+            }
+            // Update end point location (Source:0, Target:1)
+            if (movedEndPoint != -1 && dummyNode) {
+              dummyNode.position(eventPos);
+            }
+            // change location of anchor created by drag
+            else if (movedAnchorIndex != undefined) {
+              _moveAnchorOnDrag(edge, type, movedAnchorIndex, eventPos);
+            }
+            // change location of drag and dropped anchor
+            else if (anchorTouched) {
+              // the tapStartPos check is necessary when righ clicking anchor points
+              // right clicking anchor points triggers MouseDown for Konva, but not tapstart for cy
+              // when that happens tapStartPos is undefined
+              if (anchorManager.touchedAnchorIndex === undefined && tapStartPos) {
+                anchorManager.touchedAnchorIndex = getContainingShapeIndex(
+                  tapStartPos.x,
+                  tapStartPos.y,
+                  anchorManager.edge);
+              }
+
+              if (anchorManager.touchedAnchorIndex !== undefined) {
+                _moveAnchorOnDrag(
+                  anchorManager.edge,
+                  anchorManager.edgeType,
+                  anchorManager.touchedAnchorIndex,
+                  eventPos
+                );
+              }
             }
 
-            if(anchorManager.touchedAnchorIndex !== undefined){
-              _moveAnchorOnDrag(
-                anchorManager.edge,
-                anchorManager.edgeType,
-                anchorManager.touchedAnchorIndex,
-                eventPos
-              );
+            if (event.target && event.target[0] && event.target.isNode()) {
+              nodeToAttach = event.target;
             }
+          } else if (anchorManager.node){ //draging node anchor
+            if (!anchorTouched) return; 
+            movedNode=anchorManager.node
+            moveNodeAnchorOnDrag(anchorManager.node,eventPos,eventRenderPos);
           }
-          
-          if(event.target && event.target[0] && event.target.isNode()){
-            nodeToAttach = event.target;
-          }
-
         });
         
         cy.on('tapend', eTapEnd = function (event) {
@@ -1130,7 +1231,6 @@ module.exports = function (params, cy) {
           }
 
           var edge = movedEdge || anchorManager.edge; 
-          
           if( edge !== undefined ) {
             var index = anchorManager.touchedAnchorIndex;
             if( index != undefined ) {
@@ -1279,20 +1379,35 @@ module.exports = function (params, cy) {
             (edge.data(weightStr) ? edge.data(weightStr).toString() : null) != moveAnchorParam.weights.toString()) {
             
             // anchor created from drag
-            if(anchorCreatedByDrag){
-            edge.select(); 
-
-            // stops the unbundled bezier edges from being unselected
-            cy.autounselectify(true);
+            if (anchorCreatedByDrag) {
+              edge.select();
+              // stops the unbundled bezier edges from being unselected
+              cy.autounselectify(true);
             }
 
             if(options().undoable) {
               cy.undoRedo().do('changeAnchorPoints', moveAnchorParam);
             }
           }
+
+          if (anchorManager.node) {
+            var hasClass = false
+            if (anchorManager.node.data('scaleFactor') == 1) anchorManager.node.removeData('scaleFactor')
+            else if(anchorManager.node.data('scaleFactor') != null) hasClass = true
+            if (anchorManager.node.data('rotateAngle') == 0) anchorManager.node.removeData('rotateAngle')
+            else if(anchorManager.node.data('rotateAngle') != null) hasClass = true
+            
+            if (hasClass) anchorManager.node.addClass("edgebendediting_scaleRotate")
+            else anchorManager.node.removeClass("edgebendediting_scaleRotate")
+            setTimeout(()=>{
+              if(cy.$(":selected").length==0 && movedNode) movedNode.select()
+            },50)
+            //quite confused code in edge editing part, delay a bit so programmtically select will work again
+          }
           
           movedAnchorIndex = undefined;
           movedEdge = undefined;
+          movedNode = undefined;
           moveAnchorParam = undefined;
           createAnchorOnDrag = undefined;
           movedEndPoint = undefined;
@@ -1303,7 +1418,6 @@ module.exports = function (params, cy) {
           anchorCreatedByDrag = false;
 
           anchorManager.touchedAnchorIndex = undefined; 
-
           resetGestures();
           setTimeout(function(){refreshDraws()}, 50);
         });
@@ -1567,14 +1681,16 @@ module.exports = function (params, cy) {
           .off('style', 'edge.edgebendediting-hasbendpoints:selected, edge.edgecontrolediting-hascontrolpoints:selected', eStyle)
           .off('select', 'edge', eSelect)
           .off('unselect', 'edge', eUnselect)
+          .off('select', 'node', nSelect)
+          .off('unselect', 'node', nUnselect)
           .off('tapstart', eTapStart)
           .off('tapstart', 'edge', eTapStartOnEdge)
           .off('tapdrag', eTapDrag)
           .off('tapend', eTapEnd)
           .off('cxttap', eCxtTap)
-          .off('drag', 'node',eDrag);
 
         cy.unbind("zoom pan", eZoom);
+        cy.unbind("drag",nDrag)
     }
   };
 
