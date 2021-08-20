@@ -122,14 +122,13 @@ module.exports = function (params, cy) {
             };
           }else if(anchorManager.node){
             anchorManager.node.unselect();
-            var eventPos = event.position || event.cyPosition;
             anchorManager.node.addClass("edgebendediting_scaleRotate")
             moveAnchorParam = {
               node: anchorManager.node,
               originalWidth:  anchorManager.node.width(),
               originalHeight: anchorManager.node.height(),
-              dragStartX:event.evt.x,
-              dragStartY:event.evt.y,
+              dragStartX:event.evt.offsetX,
+              dragStartY:event.evt.offsetY,
               originalScaleFactor: anchorManager.node.data("scaleFactor")||1,
               originalRotateAngle: anchorManager.node.data("rotateAngle")||0,
               isScaleHandle:event.target.attrs.scaleHandle
@@ -222,13 +221,15 @@ module.exports = function (params, cy) {
           var _y=x*Math.sin(ang)+y*Math.cos(ang)
           var leftTop = {x: pos.x +_x,y: pos.y +_y}
 
-          var rightBottom = {x: pos.x + nodeWidth / 3, y: pos.y + nodeHeight / 3}
+          var rightBottom = {x: pos.x + nodeWidth / 2, y: pos.y + nodeHeight / 2}
           var length = getAnchorShapesLengthForNode() * 0.65* cy.zoom() / 2;
 
           var renderedSourcePos = convertToRenderedPosition({ x: leftTop.x, y: leftTop.y });
           var renderedTargetPos = convertToRenderedPosition({ x: rightBottom.x, y: rightBottom.y });
 
           endpointShape1 = new Konva.Arc({ x: renderedSourcePos.x, y: renderedSourcePos.y, innerRadius: length*2 / 3, outerRadius: length*4/3, angle: 120, rotation: 165+ang/Math.PI*180, fill: 'orange' });
+
+
           endpointShape2 = new Konva.Arrow({
             x: renderedTargetPos.x, y: renderedTargetPos.y, points: [0, 0, length*0.5, length*0.5,length*0.7,length*0.7],
             fill: 'orange',stroke: 'orange',strokeWidth: 12,scaleHandle:1        })
@@ -827,9 +828,11 @@ module.exports = function (params, cy) {
           var angle=Math.atan2(det,dot)+moveAnchorParam.originalRotateAngle
           var degreeAng=angle/Math.PI*180
           var fixedDegree= (degreeAng/90).toFixed(0)*90
+          
           if(Math.abs(fixedDegree-degreeAng)<15) angle=fixedDegree*Math.PI/180
           node.data('rotateAngle',angle)
         }
+        refreshDraws()
       }
 
       function moveAnchorOnDrag(edge, type, index, position){
@@ -1003,6 +1006,10 @@ module.exports = function (params, cy) {
         
         cy.on('select', 'node', nSelect = function () {
           var numberOfSelectedNodes=cy.nodes(':selected').length;
+          if (edgeToHighlight) {
+            edgeToHighlight.removeClass('cy-edge-editing-highlight');
+            edgeToHighlight = undefined
+          }
           if (nodeToHighlight) {
             nodeToHighlight.removeClass('cy-node-editing-highlight');
             nodeToHighlight=undefined;
@@ -1015,13 +1022,14 @@ module.exports = function (params, cy) {
         });
         cy.on('unselect', 'node', nUnselect = function () {
           var numberOfSelectedNodes=cy.nodes(':selected').length;
-          if (nodeToHighlight) {
-            nodeToHighlight.removeClass('cy-node-editing-highlight');
-            nodeToHighlight=undefined;
-          }
           if(numberOfSelectedNodes==1 && numberOfSelectedEdges==0) {
             nodeToHighlight=cy.nodes(':selected')[0]
             nodeToHighlight.addClass('cy-node-editing-highlight');            
+          }else{
+            if (nodeToHighlight) {
+              nodeToHighlight.removeClass('cy-node-editing-highlight');
+              nodeToHighlight=undefined;
+            }
           }
           refreshDraws();
         });
@@ -1029,12 +1037,10 @@ module.exports = function (params, cy) {
 
         cy.on('select', 'edge', eSelect = function () {
           var edge = this;
-
           if(edge.target().connectedEdges().length == 0 || edge.source().connectedEdges().length == 0){
             return;
           }
 
-         
           numberOfSelectedEdges = numberOfSelectedEdges + 1;
           
           cy.startBatch();
@@ -1042,8 +1048,12 @@ module.exports = function (params, cy) {
           if (edgeToHighlight) {
             edgeToHighlight.removeClass('cy-edge-editing-highlight');
           }
-            
-          if (numberOfSelectedEdges === 1) {
+          if (nodeToHighlight) {
+            nodeToHighlight.removeClass('cy-node-editing-highlight');
+            nodeToHighlight=undefined;
+          }
+          
+          if (numberOfSelectedEdges === 1 && cy.$(':selected').length==1) {
             edgeToHighlight = edge;
             edgeToHighlight.addClass('cy-edge-editing-highlight');
           }
@@ -1096,9 +1106,19 @@ module.exports = function (params, cy) {
         var detachedNode;
         var nodeToAttach;
         var anchorCreatedByDrag = false;
+        var draggingNodesInitialPos=[]
 
         cy.on('tapstart', eTapStart = function(event) {
           tapStartPos = event.position || event.cyPosition;
+          if(event.target.isNode && event.target.isNode() ){
+            cy.boxSelectionEnabled(false)
+            var selectedNodes=cy.nodes(':selected')
+            if(!event.target.selected()) selectedNodes=selectedNodes.union(event.target)
+            selectedNodes.forEach(ele=>{
+              var pos=ele.position()
+              draggingNodesInitialPos.push({n:ele,ox:pos.x,oy:pos.y})
+            })
+          } 
         });
 
         cy.on('tapstart', 'edge', eTapStartOnEdge = function (event) {
@@ -1148,6 +1168,18 @@ module.exports = function (params, cy) {
            * fixes the node-editing problem where nodes would get
            * unselected after resize drag
           */
+          if (draggingNodesInitialPos.length>0 && shiftKeyState) {
+            draggingNodesInitialPos.forEach(obj=>{
+                var curPos=obj.n.position()
+                var deltax=curPos.x-obj.ox;
+                var deltay=curPos.y-obj.oy
+                if(Math.abs(deltay)>Math.abs(deltax)){ //move in vertical direction
+                  obj.n.position("x",obj.ox)
+                }else{ //move in horizontal direction
+                  obj.n.position("y",obj.oy)
+                }
+            })
+          }
           if (!anchorManager.node && !anchorManager.edge) return;
           var eventPos = event.position || event.cyPosition;
           var eventRenderPos=event.renderedPosition
@@ -1225,7 +1257,7 @@ module.exports = function (params, cy) {
         });
         
         cy.on('tapend', eTapEnd = function (event) {
-
+          cy.boxSelectionEnabled(true)
           if(mouseOut){
             canvas.getStage().fire("contentMouseup");
           }
@@ -1362,33 +1394,35 @@ module.exports = function (params, cy) {
               edge.select();
               cy.remove(dummyNode);
             }
-          }
-          var type = anchorPointUtilities.getEdgeType(edge);
+            var type = anchorPointUtilities.getEdgeType(edge);
 
-          // to avoid errors
-          if(type === 'inconclusive'){
-            type = 'bend';
-          }
-
-          if(anchorManager.touchedAnchorIndex === undefined && !anchorCreatedByDrag){
-            moveAnchorParam = undefined;
-          }
-
-          var weightStr = anchorPointUtilities.syntax[type]['weight'];
-          if (edge !== undefined && moveAnchorParam !== undefined && 
-            (edge.data(weightStr) ? edge.data(weightStr).toString() : null) != moveAnchorParam.weights.toString()) {
-            
-            // anchor created from drag
-            if (anchorCreatedByDrag) {
-              edge.select();
-              // stops the unbundled bezier edges from being unselected
-              cy.autounselectify(true);
+            // to avoid errors
+            if(type === 'inconclusive'){
+              type = 'bend';
             }
-
-            if(options().undoable) {
-              cy.undoRedo().do('changeAnchorPoints', moveAnchorParam);
+  
+            if(anchorManager.touchedAnchorIndex === undefined && !anchorCreatedByDrag){
+              moveAnchorParam = undefined;
             }
+  
+            var weightStr = anchorPointUtilities.syntax[type]['weight'];
+            if (edge !== undefined && moveAnchorParam !== undefined && 
+              (edge.data(weightStr) ? edge.data(weightStr).toString() : null) != moveAnchorParam.weights.toString()) {
+              
+              // anchor created from drag
+              if (anchorCreatedByDrag) {
+                edge.select();
+                // stops the unbundled bezier edges from being unselected
+                cy.autounselectify(true);
+              }
+  
+              if(options().undoable) {
+                cy.undoRedo().do('changeAnchorPoints', moveAnchorParam);
+              }
+            }
+            //end of edge tapend processing
           }
+          
 
           if (anchorManager.node) {
             var hasClass = false
@@ -1399,12 +1433,26 @@ module.exports = function (params, cy) {
             
             if (hasClass) anchorManager.node.addClass("edgebendediting_scaleRotate")
             else anchorManager.node.removeClass("edgebendediting_scaleRotate")
+          
+            if(moveAnchorParam){
+              var oldScaleRotate={scale:moveAnchorParam.originalScaleFactor,rotate:moveAnchorParam.originalRotateAngle}
+              if (options().undoable) {
+                  cy.undoRedo().do('useScaleRotate', {"node":anchorManager.node,"newScaleRotate":{"scale":anchorManager.node.data('scaleFactor')||1,"rotate":anchorManager.node.data('rotateAngle')||0},"oldScaleRotate":oldScaleRotate} );
+              }
+            }
+
+            if(nodeToHighlight!=event.target){
+              anchorManager.node.removeClass('cy-node-editing-highlight');
+              nodeToHighlight=undefined;
+            }
+
+            var theNode=movedNode
             setTimeout(()=>{
-              if(cy.$(":selected").length==0 && movedNode) movedNode.select()
+              if(cy.$(":selected").length==0 && theNode) theNode.select()
             },50)
             //quite confused code in edge editing part, delay a bit so programmtically select will work again
           }
-          
+          draggingNodesInitialPos.length=0
           movedAnchorIndex = undefined;
           movedEdge = undefined;
           movedNode = undefined;
@@ -1586,9 +1634,10 @@ module.exports = function (params, cy) {
         '39': false,
         '40': false
       };
+      var shiftKeyState=false
 
       function keyDown(e) {
-
+          shiftKeyState=e.shiftKey
           var shouldMove = typeof options().moveSelectedAnchorsOnKeyEvents === 'function'
               ? options().moveSelectedAnchorsOnKeyEvents() : options().moveSelectedAnchorsOnKeyEvents;
 
@@ -1652,7 +1701,7 @@ module.exports = function (params, cy) {
           }
       }
       function keyUp(e) {
-
+          shiftKeyState=e.shiftKey
           if (e.keyCode < '37' || e.keyCode > '40') {
               return;
           }

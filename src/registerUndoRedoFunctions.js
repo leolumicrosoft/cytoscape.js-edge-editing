@@ -153,6 +153,30 @@ module.exports = function (cy, anchorPointUtilities, params) {
     };
   }
 
+  function applyScaleRotate() {
+    var executeScaleRotate=(node,scale,rotate)=>{
+      if(scale!=1) node.data('scaleFactor',scale)
+      else node.removeData('scaleFactor')
+      if(rotate!=0) node.data('rotateAngle',rotate)
+      else node.removeData('rotateAngle')
+      if(scale==1 && rotate==0) node.removeClass("edgebendediting_scaleRotate")
+      else node.addClass("edgebendediting_scaleRotate")
+    }
+    ur.action( "useScaleRotate"
+        , (arg)=>{
+            executeScaleRotate(arg.node,arg.newScaleRotate.scale,arg.newScaleRotate.rotate)      
+            return arg
+        }
+        , (arg)=>{
+            arg.node.unselect()
+            executeScaleRotate(arg.node,arg.oldScaleRotate.scale,arg.oldScaleRotate.rotate)
+            return arg
+        }
+    )
+  }
+
+
+  applyScaleRotate()
   ur.action('changeAnchorPoints', changeAnchorPoints, changeAnchorPoints);
   ur.action('moveAnchorPoints', moveDo, moveDo);
   ur.action('reconnectEdge', reconnectEdge, reconnectEdge);
