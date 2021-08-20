@@ -23,7 +23,7 @@ let config = {
   mode: 'production',
   output: {
     path: path.join( __dirname ),
-    filename: pkg.name + '.js',
+    filename: 'azureiotrocks-cytoscape-edge-editing.js',
     library: camelcase( pkg.name ),
     libraryTarget: 'umd'
   },
