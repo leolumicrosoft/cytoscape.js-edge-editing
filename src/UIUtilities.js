@@ -121,16 +121,18 @@ module.exports = function (params, cy) {
               distances: edge.data(distanceStr) ? [].concat(edge.data(distanceStr)) : []
             };
           }else if(anchorManager.node){
-            anchorManager.node.unselect();
-            anchorManager.node.addClass("edgebendediting_scaleRotate")
+            var n=anchorManager.node
+            if(n.data("originalWidth")==null) {
+              n.data("originalWidth",n.width())
+              n.data("originalHeight",n.height())
+            }
+            n.addClass("edgebendediting_scaleRotate")
             moveAnchorParam = {
-              node: anchorManager.node,
-              originalWidth:  anchorManager.node.width(),
-              originalHeight: anchorManager.node.height(),
+              node: n,
               dragStartX:event.evt.offsetX,
               dragStartY:event.evt.offsetY,
-              originalScaleFactor: anchorManager.node.data("scaleFactor")||1,
-              originalRotateAngle: anchorManager.node.data("rotateAngle")||0,
+              originalScaleFactor: n.data("scaleFactor")||1,
+              originalRotateAngle: n.data("rotateAngle")||0,
               isScaleHandle:event.target.attrs.scaleHandle
             };
           }
@@ -207,25 +209,26 @@ module.exports = function (params, cy) {
           }
         },
 
+
         renderAnchorShapesForNode:function(node){
           this.node = node
           this.edge = undefined
           var pos = node.position()
           var nodeWidth = node.width()
           var nodeHeight = node.height()
-
-
           var ang=node.data("rotateAngle")||0
+
           var x= - nodeWidth / 2, y=- nodeHeight / 2
           var _x=x*Math.cos(ang)-y*Math.sin(ang)
           var _y=x*Math.sin(ang)+y*Math.cos(ang)
           var leftTop = {x: pos.x +_x,y: pos.y +_y}
 
-          var rightBottom = {x: pos.x + nodeWidth / 2, y: pos.y + nodeHeight / 2}
+          var newwh=getHalfWidthAndHeightAfterRotate(node)
+          var newRightBottom = {x: pos.x + newwh[0], y: pos.y + newwh[1]}
           var length = getAnchorShapesLengthForNode() * 0.65* cy.zoom() / 2;
 
           var renderedSourcePos = convertToRenderedPosition({ x: leftTop.x, y: leftTop.y });
-          var renderedTargetPos = convertToRenderedPosition({ x: rightBottom.x, y: rightBottom.y });
+          var renderedTargetPos = convertToRenderedPosition({ x: newRightBottom.x, y: newRightBottom.y });
 
           endpointShape1 = new Konva.Arc({ x: renderedSourcePos.x, y: renderedSourcePos.y, innerRadius: length*2 / 3, outerRadius: length*4/3, angle: 120, rotation: 165+ang/Math.PI*180, fill: 'orange' });
 
@@ -647,6 +650,28 @@ module.exports = function (params, cy) {
           return 2.5 * actualFactor;
         else return parseFloat(edge.css('width'))*actualFactor;
       }
+
+      function getHalfWidthAndHeightAfterRotate(node) {
+        var rotateAngle = node.pstyle("shape-rotation").value
+        let cos = Math.cos(rotateAngle);
+        let sin = Math.sin(rotateAngle);
+        var hw=node.width()/2
+        var hh=node.height()/2
+        var oshape = [-hw, -hh, hw, -hh, hw, hh, -hw, hh]
+        var allx = [], ally = []
+        for (var i = 0; i < oshape.length; i += 2) {
+          var ox = oshape[i], oy = oshape[i + 1]
+          var _ox = ox * cos - oy * sin
+          var _oy = ox * sin + oy * cos
+          allx.push(_ox)
+          ally.push(_oy)
+        }
+
+        hw = (Math.max(...allx) - Math.min(...allx)) / 2
+        hh = (Math.max(...ally) - Math.min(...ally)) / 2
+        return [hw,hh]
+      }
+
       function getAnchorShapesLengthForNode() {
         var factor = options().anchorShapeSizeFactor;
         if(options().enableAnchorSizeNotImpactByZoom) var actualFactor= factor/cy.zoom()
@@ -805,20 +830,23 @@ module.exports = function (params, cy) {
         return {"costDistance":cost,"x":targetPointX,"y":targetPointY,"angle":chosenAngle}
       }
 
-      function moveNodeAnchorOnDrag(node,position,renderPos){
+      function moveNodeAnchorOnDrag(node,renderPos){
         if(!moveAnchorParam) return;
-        var pos=node.position()
         var rpos=node.renderedPosition()
 
         if(moveAnchorParam.isScaleHandle){
-          var w=moveAnchorParam.originalWidth||30
-          var h=moveAnchorParam.originalHeight||30
+          var w=moveAnchorParam.originalWidth
+          var h=moveAnchorParam.originalHeight
           var originalF=moveAnchorParam.originalScaleFactor
-          var f1=Math.abs(position.x-pos.x)/w*2
-          var f2=Math.abs(position.y-pos.y)/h*2
+          var f1=Math.abs((renderPos.x-rpos.x)/(moveAnchorParam.dragStartX-rpos.x))
+          var f2=Math.abs((renderPos.y-rpos.y)/(moveAnchorParam.dragStartY-rpos.y))
           var f=Math.min(f1,f2) * originalF
           var intF=f.toFixed(0)
-          if(Math.abs(f-intF)<0.3) f=intF
+          var zoomLevel=cy.zoom()
+          var threshold=0.25/zoomLevel
+          if(threshold<0.1) threshold=0.1
+          if(threshold>0.5) threshold=0.5
+          if(Math.abs(f-intF)<threshold) f=intF
           if(f<0.2) f=0.2
           node.data('scaleFactor',f)
         }else{
@@ -829,7 +857,7 @@ module.exports = function (params, cy) {
           var degreeAng=angle/Math.PI*180
           var fixedDegree= (degreeAng/90).toFixed(0)*90
           
-          if(Math.abs(fixedDegree-degreeAng)<15) angle=fixedDegree*Math.PI/180
+          if(Math.abs(fixedDegree-degreeAng)<10) angle=fixedDegree*Math.PI/180
           node.data('rotateAngle',angle)
         }
         refreshDraws()
@@ -1252,7 +1280,7 @@ module.exports = function (params, cy) {
           } else if (anchorManager.node){ //draging node anchor
             if (!anchorTouched) return; 
             movedNode=anchorManager.node
-            moveNodeAnchorOnDrag(anchorManager.node,eventPos,eventRenderPos);
+            moveNodeAnchorOnDrag(anchorManager.node,eventRenderPos);
           }
         });
         
